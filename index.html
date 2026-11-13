@@ -500,7 +500,7 @@
 
     </main>
 
-    <!-- Модальне вікно підтвердження видалення пристрою (замість confirm()) -->
+    <!-- Модальне вікно підтвердження видалення пристрою -->
     <div id="delete-modal" class="hidden fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
         <div class="bg-steel-800 border border-steel-600 rounded-lg max-w-sm w-full p-5 space-y-4 shadow-2xl">
             <h3 class="text-base font-semibold text-steel-200">Видалення пристрою</h3>
@@ -513,6 +513,49 @@
                 </button>
                 <button onclick="confirmDeleteDevice()" class="px-4 py-2 bg-red-800 hover:bg-red-700 text-white text-xs font-mono font-semibold rounded">
                     Видалити
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальне спливаюче вікно запиту на авторизацію пристрою у адміністратора -->
+    <div id="auth-request-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+        <div class="bg-steel-800 border-2 border-emerald-500/70 rounded-xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-pulse-once">
+            <div class="flex items-center space-x-3 border-b border-steel-600 pb-3">
+                <div class="w-10 h-10 rounded-lg bg-emerald-950/80 border border-emerald-500 flex items-center justify-center text-emerald-400 shrink-0">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-steel-100">Запит на підключення термінала</h3>
+                    <p class="text-xs font-mono text-emerald-400">БЕЗПЕКОВИЙ ШЛЮЗ</p>
+                </div>
+            </div>
+
+            <div class="bg-steel-900 border border-steel-600 rounded-lg p-4 text-center space-y-2">
+                <p class="text-sm text-steel-300">Пристрій намагається увійти в систему:</p>
+                <div id="auth-request-device-name" class="font-mono text-2xl font-bold text-steel-100 tracking-wider">
+                    Пристрій #001
+                </div>
+                <p class="text-xs text-steel-400">Надайте дозвіл на встановлення захищеного сеансу зв'язку</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 pt-1">
+                <button onclick="resolveAuthRequest(false)"
+                    class="hardware-btn py-3 px-4 bg-red-950/80 hover:bg-red-800 border border-red-600/70 text-red-200 font-semibold text-xs uppercase tracking-wider rounded-md transition flex items-center justify-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                    <span>Заборонити</span>
+                </button>
+
+                <button onclick="resolveAuthRequest(true)"
+                    class="hardware-btn py-3 px-4 bg-emerald-700 hover:bg-emerald-600 border border-emerald-500 text-white font-semibold text-xs uppercase tracking-wider rounded-md transition flex items-center justify-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M5 13l4 4L19 7"/>
+                    </svg>
+                    <span>Дозволити</span>
                 </button>
             </div>
         </div>
@@ -540,24 +583,25 @@
         const ADMIN_CODE = '858';
         const DEFAULT_DEVICE = '001';
         const HEARTBEAT_INTERVAL_MS = 2000;
-        const ONLINE_THRESHOLD_MS = 5500; // Пристрій вважається онлайн, якщо пінг був < 5.5 сек тому
+        const ONLINE_THRESHOLD_MS = 5500;
 
         window.state = {
             role: null, // 'admin' | 'terminal' | null
             terminalCode: null,
             selectedDeviceCode: null,
-            devices: {}, // { '001': { code: '001', lastSeen: 0, forceLogoutAt: 0, payment: { status: 'idle'|'pending'|'success'|'failed', amount: 0, txId: '' } } }
+            devices: {}, // { '001': { code: '001', status: 'pending'|'approved'|'rejected', lastSeen: 0, forceLogoutAt: 0, payment: {...} } }
             soundEnabled: true,
             lastHandledTxKey: null,
             resultResetTimer: null,
             loadingTimer: null,
-            deviceToDelete: null
+            deviceToDelete: null,
+            currentAuthRequestDevice: null
         };
         const state = window.state;
 
         // Канальні інструменти для локальної синхронізації між вкладками
-        const LOCAL_STORAGE_KEY = 'pos_simulator_devices_v1';
-        const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('pos_simulator_channel') : null;
+        const LOCAL_STORAGE_KEY = 'pos_simulator_devices_v2';
+        const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('pos_simulator_channel_v2') : null;
 
         // Firebase змінні
         let db = null;
@@ -612,9 +656,7 @@
                     osc.start(now);
                     osc.stop(now + 0.35);
                 }
-            } catch (e) {
-                // Ігноруємо помилки аудіо до першої взаємодії
-            }
+            } catch (e) {}
         }
 
         window.toggleSound = function () {
@@ -634,9 +676,7 @@
                         state.devices = parsed;
                     }
                 }
-            } catch (e) {
-                console.warn('Помилка читання локального стану:', e);
-            }
+            } catch (e) {}
             if (!state.devices[DEFAULT_DEVICE]) {
                 state.devices[DEFAULT_DEVICE] = createDefaultDeviceObj(DEFAULT_DEVICE);
                 saveLocalDevices(false);
@@ -646,6 +686,7 @@
         function createDefaultDeviceObj(code) {
             return {
                 code: code,
+                status: 'approved', // 'pending' | 'approved' | 'rejected'
                 lastSeen: 0,
                 forceLogoutAt: 0,
                 payment: {
@@ -662,9 +703,7 @@
                 if (broadcast && bc) {
                     bc.postMessage({ type: 'SYNC_DEVICES', devices: state.devices });
                 }
-            } catch (e) {
-                console.warn('Помилка збереження локального стану:', e);
-            }
+            } catch (e) {}
         }
 
         if (bc) {
@@ -674,7 +713,11 @@
                     onDevicesUpdated();
                 } else if (event.data && event.data.type === 'FORCE_LOGOUT_DEVICE') {
                     if (state.role === 'terminal' && state.terminalCode === event.data.code) {
-                        performForcedLogout();
+                        performForcedLogout('Пристрій відключено адміністратором');
+                    }
+                } else if (event.data && event.data.type === 'AUTH_RESOLVED') {
+                    if (state.role === 'terminal' && state.terminalCode === event.data.code) {
+                        handleAuthResolutionMessage(event.data.approved);
                     }
                 }
             };
@@ -723,7 +766,6 @@
                     updateSyncIndicator(false, 'Локальний режим');
                 }
             } catch (err) {
-                console.warn('Хмарна синхронізація недоступна, використовується локальна:', err);
                 updateSyncIndicator(false, 'Помилка Firebase (локальний режим)');
             }
 
@@ -741,7 +783,7 @@
 
         function subscribeToFirestore() {
             if (!useFirestore || !currentUser) return;
-            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'pos_devices');
+            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'pos_devices_v2');
             onSnapshot(colRef, async (snapshot) => {
                 if (snapshot.empty) {
                     const defDev = createDefaultDeviceObj(DEFAULT_DEVICE);
@@ -761,9 +803,7 @@
                 state.devices = nextDevices;
                 saveLocalDevices(false);
                 onDevicesUpdated();
-            }, (error) => {
-                console.error('Помилка підписки Firestore:', error);
-            });
+            }, (error) => {});
         }
 
         async function persistDevice(deviceObj) {
@@ -773,11 +813,9 @@
 
             if (useFirestore && currentUser && db) {
                 try {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'pos_devices', deviceObj.code);
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'pos_devices_v2', deviceObj.code);
                     await setDoc(docRef, deviceObj, { merge: true });
-                } catch (e) {
-                    console.error('Помилка запису пристрою:', e);
-                }
+                } catch (e) {}
             }
         }
 
@@ -788,11 +826,9 @@
 
             if (useFirestore && currentUser && db) {
                 try {
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'pos_devices', code);
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'pos_devices_v2', code);
                     await deleteDoc(docRef);
-                } catch (e) {
-                    console.error('Помилка видалення пристрою:', e);
-                }
+                } catch (e) {}
             }
         }
 
@@ -842,9 +878,9 @@
             }
 
             if (state.devices[rawCode]) {
-                playBeep('success');
-                errorBox.classList.add('hidden');
-                enterTerminalMode(rawCode);
+                const dev = state.devices[rawCode];
+                // Запускаємо процес авторизації (переводимо в статус pending)
+                requestDeviceLogin(rawCode);
                 return;
             }
 
@@ -852,6 +888,69 @@
             errorBox.classList.remove('hidden');
             playBeep('error');
         };
+
+        async function requestDeviceLogin(code) {
+            playBeep('request');
+            const errorBox = document.getElementById('login-error-box');
+            errorBox.textContent = `Запит для #${code} надіслано адміністратору. Очікування...`;
+            errorBox.className = 'bg-steel-900 border border-amber-600/80 text-amber-300 px-3 py-2.5 rounded text-xs font-mono text-center';
+            errorBox.classList.remove('hidden');
+
+            const dev = state.devices[code] || createDefaultDeviceObj(code);
+            dev.status = 'pending';
+            dev.lastSeen = Date.now();
+            dev.forceLogoutAt = 0;
+            await persistDevice(dev);
+
+            // Зберігаємо тимчасово коди для очікування відповіді
+            state.terminalCode = code;
+            startWaitingForAuthApproval(code);
+        }
+
+        let authCheckInterval = null;
+
+        function startWaitingForAuthApproval(code) {
+            if (authCheckInterval) clearInterval(authCheckInterval);
+
+            authCheckInterval = setInterval(() => {
+                if (state.role === 'terminal') {
+                    clearInterval(authCheckInterval);
+                    return;
+                }
+                const dev = state.devices[code];
+                if (!dev) {
+                    clearInterval(authCheckInterval);
+                    showLoginError('Пристрій видалено з системи');
+                    return;
+                }
+                if (dev.status === 'approved') {
+                    clearInterval(authCheckInterval);
+                    enterTerminalMode(code);
+                } else if (dev.status === 'rejected') {
+                    clearInterval(authCheckInterval);
+                    showLoginError('Адміністратор відхилив запит на вхід');
+                    state.terminalCode = null;
+                }
+            }, 1000);
+        }
+
+        function showLoginError(msg) {
+            const errorBox = document.getElementById('login-error-box');
+            errorBox.textContent = msg;
+            errorBox.className = 'bg-steel-900 border border-red-800/80 text-red-400 px-3 py-2.5 rounded text-xs font-mono text-center';
+            errorBox.classList.remove('hidden');
+            playBeep('error');
+        }
+
+        function handleAuthResolutionMessage(approved) {
+            if (state.role !== 'terminal') return;
+            if (approved) {
+                playBeep('success');
+                enterTerminalMode(state.terminalCode);
+            } else {
+                performForcedLogout('Адміністратор відхилив запит на вхід');
+            }
+        }
 
         function switchScreen(screenId) {
             ['view-login', 'view-admin', 'view-terminal'].forEach(id => {
@@ -881,17 +980,19 @@
             const currentDev = state.devices[code] || createDefaultDeviceObj(code);
             await persistDevice({
                 ...currentDev,
+                status: 'approved',
                 lastSeen: Date.now(),
                 forceLogoutAt: 0
             });
             updateTerminalScreenUI();
         }
 
-        function performForcedLogout() {
+        function performForcedLogout(reason = 'Пристрій відключено адміністратором') {
             if (state.role !== 'terminal') return;
             playBeep('error');
             clearTimeout(state.loadingTimer);
             clearTimeout(state.resultResetTimer);
+            if (authCheckInterval) clearInterval(authCheckInterval);
 
             const disconnectedCode = state.terminalCode;
             state.role = null;
@@ -901,9 +1002,7 @@
             document.getElementById('header-title').textContent = 'POS-SYSTEM // CORE v2.4';
             switchScreen('view-login');
 
-            const errorBox = document.getElementById('login-error-box');
-            errorBox.textContent = `Пристрій #${disconnectedCode} відключено адміністратором`;
-            errorBox.classList.remove('hidden');
+            showLoginError(reason);
         }
 
         window.logout = async function () {
@@ -914,6 +1013,7 @@
             }
             clearTimeout(state.loadingTimer);
             clearTimeout(state.resultResetTimer);
+            if (authCheckInterval) clearInterval(authCheckInterval);
 
             state.role = null;
             state.terminalCode = null;
@@ -951,6 +1051,7 @@
             } else if (state.role === 'admin') {
                 renderAdminDevicesList();
                 renderAdminSelectedDevicePanel();
+                checkPendingAuthRequestsInAdmin();
             }
         }, HEARTBEAT_INTERVAL_MS);
 
@@ -959,7 +1060,59 @@
             return (Date.now() - dev.lastSeen) < ONLINE_THRESHOLD_MS;
         }
 
-        // -------------------- ЛОГІКА ПАНЕЛІ АДМІНІСТРАТОРА --------------------
+        // -------------------- ЛОГІКА ПАНЕЛІ АДМІНІСТРАТОРА ТА МОДАЛЬНОГО ВІКНА ЗАПИТУ --------------------
+        function checkPendingAuthRequestsInAdmin() {
+            if (state.role !== 'admin') return;
+            // Шукаємо перший пристрій зі статусом 'pending'
+            const pendingCode = Object.keys(state.devices).find(code => {
+                const d = state.devices[code];
+                return d && d.status === 'pending' && isDeviceOnline(d);
+            });
+
+            const modal = document.getElementById('auth-request-modal');
+            if (pendingCode) {
+                if (state.currentAuthRequestDevice !== pendingCode) {
+                    state.currentAuthRequestDevice = pendingCode;
+                    document.getElementById('auth-request-device-name').textContent = `Пристрій #${pendingCode}`;
+                    modal.classList.remove('hidden');
+                    playBeep('request');
+                }
+            } else {
+                modal.classList.add('hidden');
+                state.currentAuthRequestDevice = null;
+            }
+        }
+
+        window.resolveAuthRequest = async function (approved) {
+            const code = state.currentAuthRequestDevice;
+            if (!code || !state.devices[code]) {
+                document.getElementById('auth-request-modal').classList.add('hidden');
+                state.currentAuthRequestDevice = null;
+                return;
+            }
+
+            playBeep(approved ? 'success' : 'error');
+            const dev = state.devices[code];
+            dev.status = approved ? 'approved' : 'rejected';
+            if (!approved) {
+                dev.lastSeen = 0;
+            }
+
+            if (bc) {
+                bc.postMessage({ type: 'AUTH_RESOLVED', code: code, approved: approved });
+            }
+
+            document.getElementById('auth-request-modal').classList.add('hidden');
+            state.currentAuthRequestDevice = null;
+
+            const lastActionEl = document.getElementById('admin-last-action');
+            if (lastActionEl) {
+                lastActionEl.textContent = approved ? `Дозволено вхід для #${code}` : `Заборонено вхід для #${code}`;
+            }
+
+            await persistDevice(dev);
+        };
+
         window.toggleAddDeviceForm = function (show) {
             playBeep('key');
             const panel = document.getElementById('add-device-panel');
@@ -1023,6 +1176,7 @@
             const dev = state.devices[code];
             const updatedDev = {
                 ...dev,
+                status: 'rejected',
                 lastSeen: 0,
                 forceLogoutAt: Date.now(),
                 payment: {
@@ -1084,6 +1238,7 @@
                 const online = isDeviceOnline(dev);
                 const isSelected = state.selectedDeviceCode === code;
                 const hasPendingTx = dev.payment && dev.payment.status === 'pending';
+                const isAuthPending = dev.status === 'pending' && online;
 
                 const card = document.createElement('div');
                 card.onclick = () => selectDeviceInAdmin(code);
@@ -1102,6 +1257,7 @@
                             <div class="font-mono text-sm font-semibold text-steel-200 flex items-center space-x-2">
                                 <span class="truncate">Пристрій #${code}</span>
                                 ${hasPendingTx ? '<span class="px-1.5 py-0.5 text-[10px] rounded bg-amber-900/70 text-amber-300 border border-amber-700/60 shrink-0">ОПЛАТА</span>' : ''}
+                                ${isAuthPending ? '<span class="px-1.5 py-0.5 text-[10px] rounded bg-purple-900/80 text-purple-200 border border-purple-600 shrink-0 animate-pulse">ЗАПИТ ВХОДУ</span>' : ''}
                             </div>
                             <div class="flex items-center space-x-1.5 mt-1">
                                 <span class="w-2 h-2 rounded-full shrink-0 ${online ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-steel-500'}"></span>
@@ -1263,8 +1419,8 @@
             if (state.role !== 'terminal' || !state.terminalCode) return;
             const dev = state.devices[state.terminalCode];
 
-            if (!dev || (dev.forceLogoutAt && dev.forceLogoutAt > 0)) {
-                performForcedLogout();
+            if (!dev || (dev.forceLogoutAt && dev.forceLogoutAt > 0) || dev.status === 'rejected') {
+                performForcedLogout('Пристрій відключено адміністратором');
                 return;
             }
 
@@ -1324,6 +1480,7 @@
             if (state.role === 'admin') {
                 renderAdminDevicesList();
                 renderAdminSelectedDevicePanel();
+                checkPendingAuthRequestsInAdmin();
             } else if (state.role === 'terminal') {
                 updateTerminalScreenUI();
             }

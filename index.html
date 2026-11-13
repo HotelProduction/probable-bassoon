@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>POS-TERMINAL // Банківський Симулятор</title>
+    <!-- Підключення Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Підключення шрифтів Inter та JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        steel: {
+                            950: '#121316',
+                            900: '#181a1d',
+                            850: '#1e2022',
+                            800: '#25282c',
+                            750: '#2a2d32',
+                            700: '#34383f',
+                            600: '#3f444c',
+                            500: '#5a626e',
+                            400: '#8a94a2',
+                            300: '#b4bcc8',
+                            200: '#e2e8f0',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Базові налаштування та індустріальна текстура */
+        body {
+            background-color: #181a1d;
+            color: #e2e8f0;
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        /* Миготлива зелена лампочка статусу терміналу */
+        @keyframes ledPulse {
+            0%, 100% {
+                opacity: 1;
+                box-shadow: 0 0 10px 2px rgba(16, 185, 129, 0.75), inset 0 0 4px #ffffff;
+                background-color: #10b981;
+            }
+            50% {
+                opacity: 0.35;
+                box-shadow: 0 0 2px 0px rgba(16, 185, 129, 0.2);
+                background-color: #059669;
+            }
+        }
+
+        .led-online-blink {
+            animation: ledPulse 1.6s infinite ease-in-out;
+        }
+
+        /* Спінер завантаження обробки платежу */
+        @keyframes posSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .pos-spinner {
+            border: 3px solid #3f444c;
+            border-top: 3px solid #e2e8f0;
+            border-radius: 50%;
+            animation: posSpin 0.85s linear infinite;
+        }
+
+        /* Хвилі NFC безконтактної оплати */
+        @keyframes nfcWave {
+            0% { opacity: 0.25; transform: scale(0.95); }
+            50% { opacity: 1; transform: scale(1.03); }
+            100% { opacity: 0.25; transform: scale(0.95); }
+        }
+
+        .nfc-pulse {
+            animation: nfcWave 2.2s infinite ease-in-out;
+        }
+
+        /* Кастомний скролбар у сірих тонах */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #181a1d;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3f444c;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #5a626e;
+        }
+
+        /* Ефект натискання апаратних кнопок */
+        .hardware-btn:active {
+            transform: translateY(1px);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between bg-steel-900 text-steel-200 antialiased">
+
+    <!-- ==================== ВЕРХНЯ СИСТЕМНА ПАНЕЛЬ ==================== -->
+    <header class="w-full bg-steel-950 border-b border-steel-600 px-4 py-3 flex items-center justify-between sticky top-0 z-30">
+        <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 rounded bg-steel-800 border border-steel-600 flex items-center justify-center">
+                <!-- Іконка POS-модуля -->
+                <svg class="w-4 h-4 text-steel-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+                </svg>
+            </div>
+            <div>
+                <div class="font-mono text-xs sm:text-sm font-bold tracking-wider text-steel-200" id="header-title">
+                    POS-SYSTEM // CORE v2.4
+                </div>
+                <div class="flex items-center space-x-2 text-[11px] font-mono text-steel-400">
+                    <span id="sync-dot" class="w-2 h-2 rounded-full bg-steel-500 inline-block"></span>
+                    <span id="sync-status-text">Ініціалізація каналу...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+            <!-- Кнопка звуку (біпер терміналу) -->
+            <button id="toggle-sound-btn" onclick="toggleSound()" title="Звукові сигнали терміналу"
+                class="p-2 rounded bg-steel-800 hover:bg-steel-700 border border-steel-600 text-steel-300 transition">
+                <svg id="sound-on-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+                </svg>
+                <svg id="sound-off-icon" class="w-4 h-4 hidden text-steel-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/>
+                </svg>
+            </button>
+
+            <!-- Кнопка виходу (показується в адмінці та в режимі терміналу) -->
+            <button id="logout-btn" onclick="logout()"
+                class="hidden px-3 py-1.5 rounded bg-steel-800 hover:bg-steel-700 border border-steel-600 text-xs font-mono font-semibold text-steel-200 transition">
+                ВИЙТИ
+            </button>
+        </div>
+    </header>
+
+    <!-- ==================== КОНТЕЙНЕР ЕКРАНІВ ==================== -->
+    <main class="flex-1 flex flex-col items-center justify-center p-4 w-full max-w-5xl mx-auto">
+
+        <!-- 1. ЕКРАН ВХОДУ (ГОЛОВНА СТОРІНКА) -->
+        <section id="view-login" class="w-full max-w-md bg-steel-750 border border-steel-600 rounded-lg shadow-2xl overflow-hidden">
+            <div class="bg-steel-800 border-b border-steel-600 px-5 py-4 flex items-center justify-between">
+                <span class="font-mono text-xs uppercase tracking-widest text-steel-400">Авторизація вузла</span>
+                <span class="font-mono text-xs text-steel-400">SECURE LINK</span>
+            </div>
+
+            <div class="p-6 space-y-5">
+                <div class="text-center space-y-1">
+                    <h1 class="text-lg font-semibold text-steel-200 tracking-tight">Вхід у платіжний термінал</h1>
+                    <p class="text-xs text-steel-400">Введіть код пристрою або сервісний код адміністратора</p>
+                </div>
+
+                <!-- Поле вводу коду доступу -->
+                <div class="space-y-2">
+                    <label for="access-code-input" class="block font-mono text-xs uppercase tracking-wider text-steel-400">
+                        Код доступу
+                    </label>
+                    <input type="text" id="access-code-input" inputmode="numeric" maxlength="10" autocomplete="off"
+                        placeholder="___"
+                        class="w-full bg-steel-900 border border-steel-600 focus:border-steel-300 focus:outline-none rounded-md py-3.5 px-4 text-center font-mono text-3xl font-bold tracking-[0.25em] text-steel-200 placeholder-steel-600 transition">
+                </div>
+
+                <!-- Блок помилки -->
+                <div id="login-error-box" class="hidden bg-steel-900 border border-red-800/80 text-red-400 px-3 py-2.5 rounded text-xs font-mono text-center">
+                    Невірний код доступу
+                </div>
+
+                <!-- Кнопка Увійти -->
+                <button onclick="handleLogin()"
+                    class="hardware-btn w-full py-3.5 px-4 bg-steel-200 hover:bg-white text-steel-950 font-semibold text-sm uppercase tracking-wider rounded-md shadow transition">
+                    Увійти
+                </button>
+
+                <!-- Екранна цифрова клавіатура для зручності на смартфоні -->
+                <div class="pt-2 border-t border-steel-600/70">
+                    <div class="grid grid-cols-3 gap-2 font-mono">
+                        <button type="button" onclick="appendPin('1')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">1</button>
+                        <button type="button" onclick="appendPin('2')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">2</button>
+                        <button type="button" onclick="appendPin('3')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">3</button>
+                        <button type="button" onclick="appendPin('4')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">4</button>
+                        <button type="button" onclick="appendPin('5')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">5</button>
+                        <button type="button" onclick="appendPin('6')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">6</button>
+                        <button type="button" onclick="appendPin('7')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">7</button>
+                        <button type="button" onclick="appendPin('8')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">8</button>
+                        <button type="button" onclick="appendPin('9')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">9</button>
+                        <button type="button" onclick="clearPin()" class="hardware-btn py-3 bg-steel-850 hover:bg-steel-700 border border-steel-600 rounded text-xs font-semibold text-steel-400">ОЧИСТИТИ</button>
+                        <button type="button" onclick="appendPin('0')" class="hardware-btn py-3 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded text-lg font-semibold text-steel-200">0</button>
+                        <button type="button" onclick="backspacePin()" class="hardware-btn py-3 bg-steel-850 hover:bg-steel-700 border border-steel-600 rounded text-sm font-semibold text-steel-300">⌫</button>
+                    </div>
+                </div>
+
+                <div class="text-center text-[11px] font-mono text-steel-500 pt-1">
+                    Тестовий пристрій: <span class="text-steel-300">001</span> | Каса (Адмін): <span class="text-steel-300">858</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. ПАНЕЛЬ АДМІНІСТРАТОРА (КАСИРА) - КОД 858 -->
+        <section id="view-admin" class="hidden w-full space-y-5 my-2">
+            <!-- Верхня панель дій адміна -->
+            <div class="bg-steel-750 border border-steel-600 rounded-lg p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-base sm:text-lg font-semibold text-steel-200">Керування терміналами та оплатою</h2>
+                    <p class="text-xs text-steel-400 mt-0.5">Оберіть активний пристрій зі списку для виставлення рахунку</p>
+                </div>
+
+                <button id="show-add-device-btn" onclick="toggleAddDeviceForm(true)"
+                    class="hardware-btn px-4 py-2.5 bg-steel-200 hover:bg-white text-steel-950 font-semibold text-xs uppercase tracking-wider rounded-md flex items-center justify-center space-x-2 transition">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    <span>Додати пристрій</span>
+                </button>
+            </div>
+
+            <!-- Форма додавання нового пристрою -->
+            <div id="add-device-panel" class="hidden bg-steel-800 border border-steel-500 rounded-lg p-4 sm:p-5 shadow-lg">
+                <div class="flex flex-col sm:flex-row sm:items-end gap-3">
+                    <div class="flex-1">
+                        <label for="new-device-code" class="block font-mono text-xs uppercase tracking-wider text-steel-300 mb-1.5">
+                            Код нового пристрою (наприклад: 002, 105)
+                        </label>
+                        <input type="text" id="new-device-code" maxlength="10" placeholder="Введіть код пристрою..."
+                            class="w-full bg-steel-900 border border-steel-600 focus:border-steel-300 focus:outline-none rounded-md px-3.5 py-2.5 font-mono text-base text-steel-200">
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="confirmAddDevice()"
+                            class="hardware-btn flex-1 sm:flex-none px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs uppercase tracking-wider rounded-md transition">
+                            Підтвердити
+                        </button>
+                        <button onclick="toggleAddDeviceForm(false)"
+                            class="hardware-btn flex-1 sm:flex-none px-4 py-2.5 bg-steel-700 hover:bg-steel-600 text-steel-200 font-semibold text-xs uppercase tracking-wider rounded-md border border-steel-600 transition">
+                            Скасувати
+                        </button>
+                    </div>
+                </div>
+                <p id="add-device-error" class="hidden text-xs font-mono text-red-400 mt-2"></p>
+            </div>
+
+            <!-- Основна сітка: Список пристроїв + Панель керування оплатою -->
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                
+                <!-- Ліва колонка: Список пристроїв (5 колонок на десктопі) -->
+                <div class="lg:col-span-5 bg-steel-750 border border-steel-600 rounded-lg overflow-hidden flex flex-col">
+                    <div class="bg-steel-800 border-b border-steel-600 px-4 py-3 flex items-center justify-between">
+                        <span class="font-mono text-xs uppercase tracking-wider text-steel-300 font-semibold">Список пристроїв</span>
+                        <span id="devices-count-badge" class="font-mono text-xs bg-steel-900 border border-steel-600 px-2 py-0.5 rounded text-steel-300">0</span>
+                    </div>
+
+                    <div id="devices-list-container" class="p-3 space-y-2.5 max-h-[420px] overflow-y-auto">
+                        <!-- Картки пристроїв рендеряться через JS -->
+                    </div>
+                </div>
+
+                <!-- Права колонка: Керування вибраним терміналом (7 колонок на десктопі) -->
+                <div class="lg:col-span-7 bg-steel-750 border border-steel-600 rounded-lg overflow-hidden flex flex-col justify-between">
+                    <div class="bg-steel-800 border-b border-steel-600 px-4 py-3 flex items-center justify-between">
+                        <span class="font-mono text-xs uppercase tracking-wider text-steel-300 font-semibold">Термінальний модуль керування</span>
+                        <span id="selected-device-badge" class="font-mono text-xs text-steel-400">Не вибрано</span>
+                    </div>
+
+                    <!-- Заглушка, коли жоден пристрій не обрано -->
+                    <div id="admin-no-selection" class="p-10 text-center flex flex-col items-center justify-center flex-1 space-y-3">
+                        <div class="w-12 h-12 rounded-full bg-steel-800 border border-steel-600 flex items-center justify-center text-steel-400">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                            </svg>
+                        </div>
+                        <p class="text-sm text-steel-300 font-medium">Оберіть пристрій зі списку зліва</p>
+                        <p class="text-xs text-steel-400 max-w-xs">Натисніть на пристрій (наприклад, #001), щоб ввести суму оплати та вивести її на екран терміналу</p>
+                    </div>
+
+                    <!-- Робоча панель обраного пристрою -->
+                    <div id="admin-device-controls" class="hidden p-5 sm:p-6 space-y-6 flex-1 flex flex-col justify-between">
+                        <!-- Інфо про обраний пристрій -->
+                        <div class="flex flex-wrap items-center justify-between gap-3 bg-steel-850 border border-steel-600 rounded-md px-4 py-3">
+                            <div>
+                                <div class="text-xs font-mono text-steel-400">АКТИВНИЙ ТЕРМІНАЛ</div>
+                                <div class="text-lg font-mono font-bold text-steel-200" id="ctrl-device-title">Пристрій #001</div>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <div id="ctrl-device-status" class="flex items-center space-x-2 px-3 py-1.5 rounded bg-steel-900 border border-steel-600">
+                                    <!-- Статус підключення -->
+                                </div>
+                                <button id="ctrl-disconnect-btn" onclick="disconnectDevice(event, state.selectedDeviceCode)"
+                                    class="hidden hardware-btn px-3 py-1.5 rounded bg-red-950/70 hover:bg-red-800 border border-red-700/70 text-red-300 hover:text-white font-mono text-xs font-semibold transition">
+                                    Відключити
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Блок 1: Ввід суми оплати (показується коли немає активного рахунку в очікуванні) -->
+                        <div id="admin-amount-entry-block" class="space-y-4">
+                            <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                                <div class="relative flex-1">
+                                    <input type="number" id="payment-amount-input" min="0.01" step="0.01" placeholder="0.00"
+                                        oninput="handleAmountInput()"
+                                        class="w-full bg-steel-900 border border-steel-600 focus:border-steel-300 focus:outline-none rounded-md py-3.5 pl-4 pr-12 font-mono text-2xl font-bold text-steel-200 placeholder-steel-600 transition">
+                                    <span class="absolute right-4 top-1/2 -translate-y-1/2 font-mono text-lg text-steel-400">₴</span>
+                                </div>
+                                <div class="sm:w-40 text-sm font-semibold text-steel-300 uppercase tracking-wider font-mono">
+                                    Сума оплати
+                                </div>
+                            </div>
+
+                            <!-- Швидкі пресети сум для зручності гри -->
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" onclick="setQuickAmount(50)" class="px-2.5 py-1 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded font-mono text-xs text-steel-300">+50 ₴</button>
+                                <button type="button" onclick="setQuickAmount(100)" class="px-2.5 py-1 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded font-mono text-xs text-steel-300">+100 ₴</button>
+                                <button type="button" onclick="setQuickAmount(250)" class="px-2.5 py-1 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded font-mono text-xs text-steel-300">+250 ₴</button>
+                                <button type="button" onclick="setQuickAmount(500)" class="px-2.5 py-1 bg-steel-800 hover:bg-steel-700 border border-steel-600 rounded font-mono text-xs text-steel-300">+500 ₴</button>
+                            </div>
+
+                            <!-- Кнопка "Вивести на термінал" (з'являється коли сума > 0) -->
+                            <div id="send-to-terminal-wrapper" class="hidden pt-2">
+                                <button onclick="sendPaymentToTerminal()"
+                                    class="hardware-btn w-full py-3.5 px-5 bg-steel-200 hover:bg-white text-steel-950 font-bold text-sm uppercase tracking-wider rounded-md shadow-lg flex items-center justify-center space-x-2 transition">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                                    </svg>
+                                    <span>Вивести на термінал</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Блок 2: Активний рахунок на терміналі -> Кнопки "Оплата пройшла" / "Оплата не пройшла" -->
+                        <div id="admin-active-transaction-block" class="hidden space-y-5 bg-steel-850 border border-steel-600 rounded-lg p-5">
+                            <div class="flex items-center justify-between border-b border-steel-600 pb-3">
+                                <div>
+                                    <span class="text-xs font-mono uppercase text-steel-400 block">Виведено на екран терміналу</span>
+                                    <span id="active-tx-amount" class="text-2xl sm:text-3xl font-mono font-bold text-steel-200">0.00 ₴</span>
+                                </div>
+                                <span class="px-2.5 py-1 rounded bg-amber-950/60 border border-amber-700/70 text-amber-300 font-mono text-xs">
+                                    Очікування оплати...
+                                </span>
+                            </div>
+
+                            <div class="space-y-2.5">
+                                <p class="text-xs font-mono text-steel-400 uppercase tracking-wider">Підтвердження транзакції касиром:</p>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <button onclick="resolveTransaction('success')"
+                                        class="hardware-btn py-3.5 px-4 bg-emerald-700 hover:bg-emerald-600 border border-emerald-500/60 text-white font-semibold text-sm uppercase tracking-wider rounded-md shadow flex items-center justify-center space-x-2 transition">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M5 13l4 4L19 7"/>
+                                        </svg>
+                                        <span>Оплата пройшла</span>
+                                    </button>
+
+                                    <button onclick="resolveTransaction('failed')"
+                                        class="hardware-btn py-3.5 px-4 bg-red-800 hover:bg-red-700 border border-red-500/60 text-white font-semibold text-sm uppercase tracking-wider rounded-md shadow flex items-center justify-center space-x-2 transition">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M6 18L18 6M6 6l12 12"/>
+                                        </svg>
+                                        <span>Оплата не пройшла</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Нижня інформаційна стрічка -->
+                        <div class="text-[11px] font-mono text-steel-500 flex items-center justify-between border-t border-steel-600/60 pt-3">
+                            <span>PROTO: ISO-8583 SIM</span>
+                            <span id="admin-last-action">Готовий до роботи</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 3. ЕКРАН ТЕРМІНАЛУ (КЛІЄНТСЬКИЙ ПРИСТРІЙ, НАПР. 001) -->
+        <section id="view-terminal" class="hidden w-full max-w-md my-auto">
+            <!-- Корпус POS-терміналу -->
+            <div class="bg-steel-850 border-2 border-steel-600 rounded-2xl shadow-2xl overflow-hidden flex flex-col min-h-[460px] sm:min-h-[500px]">
+                
+                <!-- Верхня рамка екрана терміналу -->
+                <div class="bg-steel-950 border-b border-steel-600 px-5 py-3 flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <span class="w-2 h-2 rounded-full bg-steel-500"></span>
+                        <span class="font-mono text-xs font-bold tracking-widest text-steel-300" id="terminal-id-display">ID: 001</span>
+                    </div>
+                    <span class="font-mono text-[11px] text-steel-500">NFC / EMV READY</span>
+                </div>
+
+                <!-- Основний дисплей терміналу -->
+                <div class="flex-1 flex flex-col items-center justify-center p-6 text-center relative bg-steel-850">
+                    
+                    <!-- СТАН 1: ОЧІКУВАННЯ (РЕЖИМ СПОКОЮ) -->
+                    <div id="term-state-idle" class="space-y-6 w-full">
+                        <div class="w-16 h-16 mx-auto rounded-xl bg-steel-800 border border-steel-600 flex items-center justify-center text-steel-400">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+                            </svg>
+                        </div>
+
+                        <!-- Статус-рядок з миготливою зеленою лампочкою збоку тексту -->
+                        <div class="bg-steel-800/90 border border-steel-600 rounded-lg px-4 py-4 inline-flex items-center justify-center space-x-3 shadow-inner max-w-full">
+                            <span class="text-sm sm:text-base font-medium text-steel-200 tracking-tight">
+                                Статус - налагоджено зв'язок з сервером
+                            </span>
+                            <span class="w-3.5 h-3.5 rounded-full led-online-blink shrink-0" title="Зв'язок активний"></span>
+                        </div>
+
+                        <p class="font-mono text-xs text-steel-500">
+                            Очікування запиту від касового вузла...
+                        </p>
+                    </div>
+
+                    <!-- СТАН 2: ВИСТАВЛЕНИЙ РАХУНОК (ОПЛАТИТИ) -->
+                    <div id="term-state-pay" class="hidden space-y-6 w-full">
+                        <div class="space-y-1">
+                            <span class="font-mono text-xs uppercase tracking-widest text-steel-400">До сплати</span>
+                            <div id="term-pay-amount" class="font-mono text-4xl sm:text-5xl font-bold text-steel-200 tracking-tight py-2">
+                                0.00 ₴
+                            </div>
+                        </div>
+
+                        <!-- Індикатор безконтактної оплати NFC -->
+                        <div class="py-3 flex flex-col items-center justify-center space-y-3">
+                            <div class="w-20 h-20 rounded-full bg-steel-800 border border-steel-500 flex items-center justify-center nfc-pulse">
+                                <svg class="w-10 h-10 text-steel-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
+                                </svg>
+                            </div>
+                            <div class="px-5 py-2 bg-steel-800 border border-steel-600 rounded-md">
+                                <span class="text-lg font-semibold uppercase tracking-widest text-steel-200">Оплатити</span>
+                            </div>
+                        </div>
+
+                        <p class="font-mono text-xs text-steel-400">
+                            Прикладіть картку або пристрій з NFC
+                        </p>
+                    </div>
+
+                    <!-- СТАН 3: АНІМАЦІЯ ЗАГРУЗКИ (ОБРОБКА ПЛАТЕЖУ) -->
+                    <div id="term-state-loading" class="hidden space-y-5 w-full">
+                        <div class="w-16 h-16 mx-auto pos-spinner"></div>
+                        <div class="space-y-1">
+                            <p class="text-base font-semibold text-steel-200">Обробка платежу...</p>
+                            <p class="font-mono text-xs text-steel-400">Авторизація транзакції банком</p>
+                        </div>
+                    </div>
+
+                    <!-- СТАН 4: РЕЗУЛЬТАТ - ОПЛАТА ПРОЙШЛА УСПІШНО -->
+                    <div id="term-state-success" class="hidden space-y-5 w-full">
+                        <div class="w-20 h-20 mx-auto rounded-full bg-emerald-950/80 border-2 border-emerald-500 flex items-center justify-center text-emerald-400 shadow-lg">
+                            <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </div>
+                        <div class="space-y-1.5">
+                            <h3 class="text-xl font-bold text-emerald-400">Оплата пройшла успішно</h3>
+                            <p id="term-success-amount" class="font-mono text-lg text-steel-300">0.00 ₴</p>
+                        </div>
+                        <p class="font-mono text-[11px] text-steel-500">Дякуємо за покупку</p>
+                    </div>
+
+                    <!-- СТАН 5: РЕЗУЛЬТАТ - ОПЛАТА НЕ ПРОЙШЛА -->
+                    <div id="term-state-failed" class="hidden space-y-5 w-full">
+                        <div class="w-20 h-20 mx-auto rounded-full bg-red-950/80 border-2 border-red-500 flex items-center justify-center text-red-400 shadow-lg">
+                            <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </div>
+                        <div class="space-y-1.5">
+                            <h3 class="text-xl font-bold text-red-400">Оплата не пройшла</h3>
+                            <p class="font-mono text-xs text-steel-400">Відхилено емітентом або скасовано</p>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Нижня частина корпусу терміналу -->
+                <div class="bg-steel-950 border-t border-steel-600 px-5 py-2.5 flex items-center justify-between font-mono text-[11px] text-steel-500">
+                    <span>TERMINAL OS</span>
+                    <span id="term-clock">00:00:00</span>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Модальне вікно підтвердження видалення пристрою (замість confirm()) -->
+    <div id="delete-modal" class="hidden fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
+        <div class="bg-steel-800 border border-steel-600 rounded-lg max-w-sm w-full p-5 space-y-4 shadow-2xl">
+            <h3 class="text-base font-semibold text-steel-200">Видалення пристрою</h3>
+            <p class="text-xs text-steel-400">
+                Ви дійсно бажаєте видалити пристрій <span id="delete-modal-code" class="font-mono font-bold text-steel-200"></span> із системи?
+            </p>
+            <div class="flex justify-end space-x-2 pt-2">
+                <button onclick="closeDeleteModal()" class="px-4 py-2 bg-steel-700 hover:bg-steel-600 text-steel-200 text-xs font-mono rounded">
+                    Скасувати
+                </button>
+                <button onclick="confirmDeleteDevice()" class="px-4 py-2 bg-red-800 hover:bg-red-700 text-white text-xs font-mono font-semibold rounded">
+                    Видалити
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== ЛОГІКА ДОДАТКУ ТА СИНХРОНІЗАЦІЇ ==================== -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js";
+
+        // -------------------- НАЛАШТУВАННЯ FIREBASE --------------------
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyA-SuGTzhb9zelSg0Ab7NHPwGr7d_BjXao",
+            authDomain: "pos-terminal-b339d.firebaseapp.com",
+            projectId: "pos-terminal-b339d",
+            storageBucket: "pos-terminal-b339d.firebasestorage.app",
+            messagingSenderId: "544539639744",
+            appId: "1:544539639744:web:9eb04d5295cf2614741225",
+            measurementId: "G-7TKYMJ1ZKL"
+        };
+
+        // -------------------- ГЛОБАЛЬНИЙ СТАН ДОДАТКУ --------------------
+        const ADMIN_CODE = '858';
+        const DEFAULT_DEVICE = '001';
+        const HEARTBEAT_INTERVAL_MS = 2000;
+        const ONLINE_THRESHOLD_MS = 5500; // Пристрій вважається онлайн, якщо пінг був < 5.5 сек тому
+
+        window.state = {
+            role: null, // 'admin' | 'terminal' | null
+            terminalCode: null,
+            selectedDeviceCode: null,
+            devices: {}, // { '001': { code: '001', lastSeen: 0, forceLogoutAt: 0, payment: { status: 'idle'|'pending'|'success'|'failed', amount: 0, txId: '' } } }
+            soundEnabled: true,
+            lastHandledTxKey: null,
+            resultResetTimer: null,
+            loadingTimer: null,
+            deviceToDelete: null
+        };
+        const state = window.state;
+
+        // Канальні інструменти для локальної синхронізації між вкладками
+        const LOCAL_STORAGE_KEY = 'pos_simulator_devices_v1';
+        const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('pos_simulator_channel') : null;
+
+        // Firebase змінні
+        let db = null;
+        let auth = null;
+        let analytics = null;
+        let currentUser = null;
+        let useFirestore = false;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pos-terminal-sim';
+
+        // -------------------- ЗВУКОВИЙ СИНТЕЗАТОР POS-ТЕРМІНАЛУ --------------------
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playBeep(type = 'key') {
+            if (!state.soundEnabled) return;
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                const now = audioCtx.currentTime;
+                if (type === 'key') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, now);
+                    gain.gain.setValueAtTime(0.05, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+                    osc.start(now);
+                    osc.stop(now + 0.06);
+                } else if (type === 'request') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(660, now);
+                    osc.frequency.setValueAtTime(990, now + 0.1);
+                    gain.gain.setValueAtTime(0.08, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                } else if (type === 'success') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(784, now);
+                    osc.frequency.setValueAtTime(1046.5, now + 0.12);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+                    osc.start(now);
+                    osc.stop(now + 0.35);
+                } else if (type === 'error') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(220, now);
+                    osc.frequency.setValueAtTime(165, now + 0.15);
+                    gain.gain.setValueAtTime(0.08, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+                    osc.start(now);
+                    osc.stop(now + 0.35);
+                }
+            } catch (e) {
+                // Ігноруємо помилки аудіо до першої взаємодії
+            }
+        }
+
+        window.toggleSound = function () {
+            state.soundEnabled = !state.soundEnabled;
+            document.getElementById('sound-on-icon').classList.toggle('hidden', !state.soundEnabled);
+            document.getElementById('sound-off-icon').classList.toggle('hidden', state.soundEnabled);
+            if (state.soundEnabled) playBeep('key');
+        };
+
+        // -------------------- ІНІЦІАЛІЗАЦІЯ ХМАРИ ТА ЛОКАЛЬНОГО СХОВИЩА --------------------
+        function loadLocalDevices() {
+            try {
+                const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object') {
+                        state.devices = parsed;
+                    }
+                }
+            } catch (e) {
+                console.warn('Помилка читання локального стану:', e);
+            }
+            if (!state.devices[DEFAULT_DEVICE]) {
+                state.devices[DEFAULT_DEVICE] = createDefaultDeviceObj(DEFAULT_DEVICE);
+                saveLocalDevices(false);
+            }
+        }
+
+        function createDefaultDeviceObj(code) {
+            return {
+                code: code,
+                lastSeen: 0,
+                forceLogoutAt: 0,
+                payment: {
+                    status: 'idle',
+                    amount: 0,
+                    txId: ''
+                }
+            };
+        }
+
+        function saveLocalDevices(broadcast = true) {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state.devices));
+                if (broadcast && bc) {
+                    bc.postMessage({ type: 'SYNC_DEVICES', devices: state.devices });
+                }
+            } catch (e) {
+                console.warn('Помилка збереження локального стану:', e);
+            }
+        }
+
+        if (bc) {
+            bc.onmessage = (event) => {
+                if (event.data && event.data.type === 'SYNC_DEVICES') {
+                    state.devices = event.data.devices;
+                    onDevicesUpdated();
+                } else if (event.data && event.data.type === 'FORCE_LOGOUT_DEVICE') {
+                    if (state.role === 'terminal' && state.terminalCode === event.data.code) {
+                        performForcedLogout();
+                    }
+                }
+            };
+        }
+
+        window.addEventListener('storage', (e) => {
+            if (e.key === LOCAL_STORAGE_KEY && e.newValue) {
+                try {
+                    state.devices = JSON.parse(e.newValue);
+                    onDevicesUpdated();
+                } catch (err) {}
+            }
+        });
+
+        async function initRealtimeBackend() {
+            loadLocalDevices();
+            updateSyncIndicator(false, 'Підключення до Firebase...');
+
+            try {
+                let activeConfig = null;
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    activeConfig = JSON.parse(__firebase_config);
+                } else if (FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey) {
+                    activeConfig = FIREBASE_CONFIG;
+                }
+
+                if (activeConfig) {
+                    const app = initializeApp(activeConfig);
+                    auth = getAuth(app);
+                    db = getFirestore(app);
+                    try { analytics = getAnalytics(app); } catch(e) {}
+
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    currentUser = auth.currentUser;
+
+                    if (currentUser) {
+                        useFirestore = true;
+                        updateSyncIndicator(true, 'Хмарний канал активний');
+                        subscribeToFirestore();
+                    }
+                } else {
+                    updateSyncIndicator(false, 'Локальний режим');
+                }
+            } catch (err) {
+                console.warn('Хмарна синхронізація недоступна, використовується локальна:', err);
+                updateSyncIndicator(false, 'Помилка Firebase (локальний режим)');
+            }
+
+            onDevicesUpdated();
+        }
+
+        function updateSyncIndicator(isCloud, text) {
+            const dot = document.getElementById('sync-dot');
+            const label = document.getElementById('sync-status-text');
+            dot.className = isCloud
+                ? 'w-2 h-2 rounded-full bg-emerald-500 inline-block'
+                : 'w-2 h-2 rounded-full bg-steel-400 inline-block';
+            label.textContent = text;
+        }
+
+        function subscribeToFirestore() {
+            if (!useFirestore || !currentUser) return;
+            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'pos_devices');
+            onSnapshot(colRef, async (snapshot) => {
+                if (snapshot.empty) {
+                    const defDev = createDefaultDeviceObj(DEFAULT_DEVICE);
+                    await persistDevice(defDev);
+                    return;
+                }
+                const nextDevices = {};
+                snapshot.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    if (data && data.code) {
+                        nextDevices[data.code] = data;
+                    }
+                });
+                if (!nextDevices[DEFAULT_DEVICE]) {
+                    nextDevices[DEFAULT_DEVICE] = createDefaultDeviceObj(DEFAULT_DEVICE);
+                }
+                state.devices = nextDevices;
+                saveLocalDevices(false);
+                onDevicesUpdated();
+            }, (error) => {
+                console.error('Помилка підписки Firestore:', error);
+            });
+        }
+
+        async function persistDevice(deviceObj) {
+            state.devices[deviceObj.code] = deviceObj;
+            saveLocalDevices(true);
+            onDevicesUpdated();
+
+            if (useFirestore && currentUser && db) {
+                try {
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'pos_devices', deviceObj.code);
+                    await setDoc(docRef, deviceObj, { merge: true });
+                } catch (e) {
+                    console.error('Помилка запису пристрою:', e);
+                }
+            }
+        }
+
+        async function removeDeviceFromStorage(code) {
+            delete state.devices[code];
+            saveLocalDevices(true);
+            onDevicesUpdated();
+
+            if (useFirestore && currentUser && db) {
+                try {
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'pos_devices', code);
+                    await deleteDoc(docRef);
+                } catch (e) {
+                    console.error('Помилка видалення пристрою:', e);
+                }
+            }
+        }
+
+        // -------------------- КЕРУВАННЯ ВХОДОМ ТА ЕКРАНАМИ --------------------
+        window.appendPin = function (digit) {
+            playBeep('key');
+            const input = document.getElementById('access-code-input');
+            if (input.value.length < 10) {
+                input.value += digit;
+            }
+            document.getElementById('login-error-box').classList.add('hidden');
+        };
+
+        window.clearPin = function () {
+            playBeep('key');
+            document.getElementById('access-code-input').value = '';
+            document.getElementById('login-error-box').classList.add('hidden');
+        };
+
+        window.backspacePin = function () {
+            playBeep('key');
+            const input = document.getElementById('access-code-input');
+            input.value = input.value.slice(0, -1);
+            document.getElementById('login-error-box').classList.add('hidden');
+        };
+
+        document.getElementById('access-code-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') handleLogin();
+        });
+
+        window.handleLogin = function () {
+            const rawCode = document.getElementById('access-code-input').value.trim();
+            const errorBox = document.getElementById('login-error-box');
+
+            if (!rawCode) {
+                errorBox.textContent = 'Введіть код доступу';
+                errorBox.classList.remove('hidden');
+                playBeep('error');
+                return;
+            }
+
+            if (rawCode === ADMIN_CODE) {
+                playBeep('success');
+                errorBox.classList.add('hidden');
+                enterAdminMode();
+                return;
+            }
+
+            if (state.devices[rawCode]) {
+                playBeep('success');
+                errorBox.classList.add('hidden');
+                enterTerminalMode(rawCode);
+                return;
+            }
+
+            errorBox.textContent = 'Невірний код доступу';
+            errorBox.classList.remove('hidden');
+            playBeep('error');
+        };
+
+        function switchScreen(screenId) {
+            ['view-login', 'view-admin', 'view-terminal'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+            document.getElementById(screenId).classList.remove('hidden');
+            document.getElementById('logout-btn').classList.toggle('hidden', screenId === 'view-login');
+        }
+
+        function enterAdminMode() {
+            state.role = 'admin';
+            state.terminalCode = null;
+            document.getElementById('header-title').textContent = 'POS-SERVER // ADMIN CONSOLE';
+            switchScreen('view-admin');
+            renderAdminDevicesList();
+            renderAdminSelectedDevicePanel();
+        }
+
+        async function enterTerminalMode(code) {
+            state.role = 'terminal';
+            state.terminalCode = code;
+            state.lastHandledTxKey = null;
+            document.getElementById('header-title').textContent = `POS-TERMINAL // UNIT #${code}`;
+            document.getElementById('terminal-id-display').textContent = `ID: ${code}`;
+            switchScreen('view-terminal');
+
+            const currentDev = state.devices[code] || createDefaultDeviceObj(code);
+            await persistDevice({
+                ...currentDev,
+                lastSeen: Date.now(),
+                forceLogoutAt: 0
+            });
+            updateTerminalScreenUI();
+        }
+
+        function performForcedLogout() {
+            if (state.role !== 'terminal') return;
+            playBeep('error');
+            clearTimeout(state.loadingTimer);
+            clearTimeout(state.resultResetTimer);
+
+            const disconnectedCode = state.terminalCode;
+            state.role = null;
+            state.terminalCode = null;
+
+            document.getElementById('access-code-input').value = '';
+            document.getElementById('header-title').textContent = 'POS-SYSTEM // CORE v2.4';
+            switchScreen('view-login');
+
+            const errorBox = document.getElementById('login-error-box');
+            errorBox.textContent = `Пристрій #${disconnectedCode} відключено адміністратором`;
+            errorBox.classList.remove('hidden');
+        }
+
+        window.logout = async function () {
+            playBeep('key');
+            if (state.role === 'terminal' && state.terminalCode && state.devices[state.terminalCode]) {
+                const dev = { ...state.devices[state.terminalCode], lastSeen: 0 };
+                await persistDevice(dev);
+            }
+            clearTimeout(state.loadingTimer);
+            clearTimeout(state.resultResetTimer);
+
+            state.role = null;
+            state.terminalCode = null;
+            state.selectedDeviceCode = null;
+            document.getElementById('access-code-input').value = '';
+            document.getElementById('header-title').textContent = 'POS-SYSTEM // CORE v2.4';
+            switchScreen('view-login');
+        };
+
+        window.addEventListener('beforeunload', () => {
+            if (state.role === 'terminal' && state.terminalCode && state.devices[state.terminalCode]) {
+                state.devices[state.terminalCode].lastSeen = 0;
+                saveLocalDevices(true);
+            }
+        });
+
+        // -------------------- HEARTBEAT (МОНІТОРИНГ АКТИВНОСТІ) --------------------
+        async function sendTerminalHeartbeat() {
+            if (state.role !== 'terminal' || !state.terminalCode) return;
+            const currentDev = state.devices[state.terminalCode];
+            if (!currentDev || (currentDev.forceLogoutAt && currentDev.forceLogoutAt > 0)) {
+                performForcedLogout();
+                return;
+            }
+            const updated = {
+                ...currentDev,
+                lastSeen: Date.now()
+            };
+            await persistDevice(updated);
+        }
+
+        setInterval(() => {
+            if (state.role === 'terminal') {
+                sendTerminalHeartbeat();
+            } else if (state.role === 'admin') {
+                renderAdminDevicesList();
+                renderAdminSelectedDevicePanel();
+            }
+        }, HEARTBEAT_INTERVAL_MS);
+
+        function isDeviceOnline(dev) {
+            if (!dev || !dev.lastSeen) return false;
+            return (Date.now() - dev.lastSeen) < ONLINE_THRESHOLD_MS;
+        }
+
+        // -------------------- ЛОГІКА ПАНЕЛІ АДМІНІСТРАТОРА --------------------
+        window.toggleAddDeviceForm = function (show) {
+            playBeep('key');
+            const panel = document.getElementById('add-device-panel');
+            const err = document.getElementById('add-device-error');
+            err.classList.add('hidden');
+            if (show) {
+                panel.classList.remove('hidden');
+                const input = document.getElementById('new-device-code');
+                input.value = '';
+                input.focus();
+            } else {
+                panel.classList.add('hidden');
+            }
+        };
+
+        window.confirmAddDevice = async function () {
+            const input = document.getElementById('new-device-code');
+            const err = document.getElementById('add-device-error');
+            const code = input.value.trim();
+
+            if (!code) {
+                err.textContent = 'Помилка: введіть код пристрою.';
+                err.classList.remove('hidden');
+                playBeep('error');
+                return;
+            }
+            if (code === ADMIN_CODE) {
+                err.textContent = 'Помилка: код 858 зарезервований для адміністратора.';
+                err.classList.remove('hidden');
+                playBeep('error');
+                return;
+            }
+            if (state.devices[code]) {
+                err.textContent = `Пристрій з кодом "${code}" вже існує у списку.`;
+                err.classList.remove('hidden');
+                playBeep('error');
+                return;
+            }
+
+            playBeep('success');
+            const newDevice = createDefaultDeviceObj(code);
+            await persistDevice(newDevice);
+            toggleAddDeviceForm(false);
+            selectDeviceInAdmin(code);
+        };
+
+        window.selectDeviceInAdmin = function (code) {
+            playBeep('key');
+            state.selectedDeviceCode = code;
+            document.getElementById('payment-amount-input').value = '';
+            document.getElementById('send-to-terminal-wrapper').classList.add('hidden');
+            renderAdminDevicesList();
+            renderAdminSelectedDevicePanel();
+        };
+
+        window.disconnectDevice = async function (event, code) {
+            if (event) event.stopPropagation();
+            if (!code || !state.devices[code]) return;
+
+            playBeep('error');
+            const dev = state.devices[code];
+            const updatedDev = {
+                ...dev,
+                lastSeen: 0,
+                forceLogoutAt: Date.now(),
+                payment: {
+                    status: 'idle',
+                    amount: 0,
+                    txId: ''
+                }
+            };
+
+            if (bc) {
+                bc.postMessage({ type: 'FORCE_LOGOUT_DEVICE', code: code });
+            }
+
+            const lastActionEl = document.getElementById('admin-last-action');
+            if (lastActionEl) {
+                lastActionEl.textContent = `Примусово відключено #${code}`;
+            }
+
+            await persistDevice(updatedDev);
+        };
+
+        window.openDeleteModal = function (event, code) {
+            event.stopPropagation();
+            playBeep('key');
+            state.deviceToDelete = code;
+            document.getElementById('delete-modal-code').textContent = `#${code}`;
+            document.getElementById('delete-modal').classList.remove('hidden');
+        };
+
+        window.closeDeleteModal = function () {
+            state.deviceToDelete = null;
+            document.getElementById('delete-modal').classList.add('hidden');
+        };
+
+        window.confirmDeleteDevice = async function () {
+            if (!state.deviceToDelete) return;
+            const code = state.deviceToDelete;
+            closeDeleteModal();
+            playBeep('key');
+            if (bc) {
+                bc.postMessage({ type: 'FORCE_LOGOUT_DEVICE', code: code });
+            }
+            if (state.selectedDeviceCode === code) {
+                state.selectedDeviceCode = null;
+            }
+            await removeDeviceFromStorage(code);
+        };
+
+        function renderAdminDevicesList() {
+            const container = document.getElementById('devices-list-container');
+            const badge = document.getElementById('devices-count-badge');
+            const codes = Object.keys(state.devices).sort();
+
+            badge.textContent = codes.length;
+            container.innerHTML = '';
+
+            codes.forEach((code) => {
+                const dev = state.devices[code];
+                const online = isDeviceOnline(dev);
+                const isSelected = state.selectedDeviceCode === code;
+                const hasPendingTx = dev.payment && dev.payment.status === 'pending';
+
+                const card = document.createElement('div');
+                card.onclick = () => selectDeviceInAdmin(code);
+                card.className = `cursor-pointer rounded-md p-3.5 border transition flex items-center justify-between gap-2 ${
+                    isSelected
+                        ? 'bg-steel-800 border-steel-300 shadow-md'
+                        : 'bg-steel-850 hover:bg-steel-800 border-steel-600'
+                }`;
+
+                card.innerHTML = `
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <div class="w-9 h-9 shrink-0 rounded bg-steel-900 border border-steel-600 flex items-center justify-center font-mono text-sm font-bold text-steel-200">
+                            ${code}
+                        </div>
+                        <div class="min-w-0">
+                            <div class="font-mono text-sm font-semibold text-steel-200 flex items-center space-x-2">
+                                <span class="truncate">Пристрій #${code}</span>
+                                ${hasPendingTx ? '<span class="px-1.5 py-0.5 text-[10px] rounded bg-amber-900/70 text-amber-300 border border-amber-700/60 shrink-0">ОПЛАТА</span>' : ''}
+                            </div>
+                            <div class="flex items-center space-x-1.5 mt-1">
+                                <span class="w-2 h-2 rounded-full shrink-0 ${online ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-steel-500'}"></span>
+                                <span class="text-xs font-mono ${online ? 'text-emerald-400' : 'text-steel-400'}">
+                                    ${online ? 'Підключено' : 'Відключено'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-1.5 shrink-0">
+                        ${online ? `
+                            <button onclick="disconnectDevice(event, '${code}')" title="Примусово вийти з акаунту на пристрої"
+                                class="hardware-btn px-2.5 py-1 rounded bg-red-950/70 hover:bg-red-800 border border-red-700/70 text-[11px] font-mono font-semibold text-red-300 hover:text-white transition">
+                                Відключити
+                            </button>
+                        ` : ''}
+                        ${code !== DEFAULT_DEVICE ? `
+                            <button onclick="openDeleteModal(event, '${code}')" title="Видалити пристрій"
+                                class="p-1.5 rounded hover:bg-steel-700 text-steel-400 hover:text-red-400 transition">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                </svg>
+                            </button>
+                        ` : ''}
+                        <svg class="w-4 h-4 ${isSelected ? 'text-steel-200' : 'text-steel-500'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function renderAdminSelectedDevicePanel() {
+            const noSel = document.getElementById('admin-no-selection');
+            const controls = document.getElementById('admin-device-controls');
+            const badge = document.getElementById('selected-device-badge');
+
+            if (!state.selectedDeviceCode || !state.devices[state.selectedDeviceCode]) {
+                noSel.classList.remove('hidden');
+                controls.classList.add('hidden');
+                badge.textContent = 'Не вибрано';
+                return;
+            }
+
+            const dev = state.devices[state.selectedDeviceCode];
+            const online = isDeviceOnline(dev);
+
+            noSel.classList.add('hidden');
+            controls.classList.remove('hidden');
+            badge.textContent = `UNIT #${dev.code}`;
+            document.getElementById('ctrl-device-title').textContent = `Пристрій #${dev.code}`;
+
+            document.getElementById('ctrl-device-status').innerHTML = `
+                <span class="w-2.5 h-2.5 rounded-full ${online ? 'bg-emerald-500 led-online-blink' : 'bg-steel-500'}"></span>
+                <span class="text-xs font-mono font-semibold ${online ? 'text-emerald-400' : 'text-steel-400'}">
+                    ${online ? 'Підключено' : 'Відключено'}
+                </span>
+            `;
+
+            const ctrlDisconnectBtn = document.getElementById('ctrl-disconnect-btn');
+            if (ctrlDisconnectBtn) {
+                ctrlDisconnectBtn.classList.toggle('hidden', !online);
+            }
+
+            const entryBlock = document.getElementById('admin-amount-entry-block');
+            const activeTxBlock = document.getElementById('admin-active-transaction-block');
+
+            if (dev.payment && dev.payment.status === 'pending') {
+                entryBlock.classList.add('hidden');
+                activeTxBlock.classList.remove('hidden');
+                document.getElementById('active-tx-amount').textContent = `${Number(dev.payment.amount).toFixed(2)} ₴`;
+            } else {
+                entryBlock.classList.remove('hidden');
+                activeTxBlock.classList.add('hidden');
+            }
+        }
+
+        window.handleAmountInput = function () {
+            const val = parseFloat(document.getElementById('payment-amount-input').value);
+            const btnWrapper = document.getElementById('send-to-terminal-wrapper');
+            if (!isNaN(val) && val > 0) {
+                btnWrapper.classList.remove('hidden');
+            } else {
+                btnWrapper.classList.add('hidden');
+            }
+        };
+
+        window.setQuickAmount = function (addVal) {
+            playBeep('key');
+            const input = document.getElementById('payment-amount-input');
+            const current = parseFloat(input.value) || 0;
+            input.value = (current + addVal).toFixed(2);
+            handleAmountInput();
+        };
+
+        window.sendPaymentToTerminal = async function () {
+            if (!state.selectedDeviceCode) return;
+            const amount = parseFloat(document.getElementById('payment-amount-input').value);
+            if (isNaN(amount) || amount <= 0) return;
+
+            playBeep('request');
+            const dev = state.devices[state.selectedDeviceCode];
+            const txId = 'TX-' + Date.now();
+
+            const updatedDev = {
+                ...dev,
+                payment: {
+                    status: 'pending',
+                    amount: amount,
+                    txId: txId
+                }
+            };
+
+            document.getElementById('admin-last-action').textContent = `Відправлено ${amount.toFixed(2)} ₴ на #${dev.code}`;
+            await persistDevice(updatedDev);
+        };
+
+        window.resolveTransaction = async function (resultStatus) {
+            if (!state.selectedDeviceCode) return;
+            const dev = state.devices[state.selectedDeviceCode];
+            if (!dev || !dev.payment) return;
+
+            playBeep(resultStatus === 'success' ? 'success' : 'error');
+
+            const updatedDev = {
+                ...dev,
+                payment: {
+                    ...dev.payment,
+                    status: resultStatus,
+                    resolvedAt: Date.now()
+                }
+            };
+
+            document.getElementById('payment-amount-input').value = '';
+            document.getElementById('send-to-terminal-wrapper').classList.add('hidden');
+            document.getElementById('admin-last-action').textContent =
+                resultStatus === 'success'
+                    ? `Підтверджено оплату на #${dev.code}`
+                    : `Відхилено оплату на #${dev.code}`;
+
+            await persistDevice(updatedDev);
+        };
+
+        // -------------------- ЛОГІКА ЕКРАНУ ТЕРМІНАЛУ (КЛІЄНТ) --------------------
+        function showTerminalSubState(subId) {
+            [
+                'term-state-idle',
+                'term-state-pay',
+                'term-state-loading',
+                'term-state-success',
+                'term-state-failed'
+            ].forEach(id => document.getElementById(id).classList.add('hidden'));
+
+            document.getElementById(subId).classList.remove('hidden');
+        }
+
+        function updateTerminalScreenUI() {
+            if (state.role !== 'terminal' || !state.terminalCode) return;
+            const dev = state.devices[state.terminalCode];
+
+            if (!dev || (dev.forceLogoutAt && dev.forceLogoutAt > 0)) {
+                performForcedLogout();
+                return;
+            }
+
+            const payment = dev.payment || { status: 'idle', amount: 0, txId: '' };
+            const txKey = `${payment.txId}_${payment.status}`;
+
+            if (payment.status === 'idle') {
+                clearTimeout(state.loadingTimer);
+                clearTimeout(state.resultResetTimer);
+                showTerminalSubState('term-state-idle');
+                return;
+            }
+
+            if (payment.status === 'pending') {
+                clearTimeout(state.loadingTimer);
+                clearTimeout(state.resultResetTimer);
+                if (state.lastHandledTxKey !== txKey) {
+                    state.lastHandledTxKey = txKey;
+                    playBeep('request');
+                }
+                document.getElementById('term-pay-amount').textContent = `${Number(payment.amount).toFixed(2)} ₴`;
+                showTerminalSubState('term-state-pay');
+                return;
+            }
+
+            if ((payment.status === 'success' || payment.status === 'failed') && state.lastHandledTxKey !== txKey) {
+                state.lastHandledTxKey = txKey;
+                clearTimeout(state.loadingTimer);
+                clearTimeout(state.resultResetTimer);
+
+                showTerminalSubState('term-state-loading');
+
+                state.loadingTimer = setTimeout(() => {
+                    if (payment.status === 'success') {
+                        playBeep('success');
+                        document.getElementById('term-success-amount').textContent = `${Number(payment.amount).toFixed(2)} ₴`;
+                        showTerminalSubState('term-state-success');
+                    } else {
+                        playBeep('error');
+                        showTerminalSubState('term-state-failed');
+                    }
+
+                    state.resultResetTimer = setTimeout(async () => {
+                        if (state.role === 'terminal' && state.terminalCode && state.devices[state.terminalCode]) {
+                            const resetDev = {
+                                ...state.devices[state.terminalCode],
+                                payment: { status: 'idle', amount: 0, txId: '' }
+                            };
+                            await persistDevice(resetDev);
+                        }
+                    }, 4500);
+                }, 1600);
+            }
+        }
+
+        function onDevicesUpdated() {
+            if (state.role === 'admin') {
+                renderAdminDevicesList();
+                renderAdminSelectedDevicePanel();
+            } else if (state.role === 'terminal') {
+                updateTerminalScreenUI();
+            }
+        }
+
+        setInterval(() => {
+            const clockEl = document.getElementById('term-clock');
+            if (clockEl) {
+                const now = new Date();
+                clockEl.textContent = now.toTimeString().split(' ')[0];
+            }
+        }, 1000);
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initRealtimeBackend();
+        });
+    </script>
+</body>
+</html>
